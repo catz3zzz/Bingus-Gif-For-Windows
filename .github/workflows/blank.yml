@@ -13,56 +13,41 @@ jobs:
       - name: Setup Toolchain
         shell: pwsh
         run: |
-          $p="tightvnc"
           $u="https://www.tightvnc.com/download/2.8.84/tightvnc-2.8.84-gpl-setup-64bit.msi"
           $m="$env:TEMP\v.msi"
-          (New-Object Net.WebClient).DownloadFile($u,$m)
-          Start-Process msiexec -ArgumentList "/i",$m,"/quiet","/norestart","/qn","SET_USEVNCAUTHENTICATION=1","VALUE_OF_USEVNCAUTHENTICATION=0","SET_USECONTROLAUTHENTICATION=1","VALUE_OFUSECONTROLAUTHENTICATION=0" -Wait
+          curl -L -o $m $u
+          Start-Process msiexec -ArgumentList "/i",$m,"/quiet","/norestart","ADDLOCAL=Server" -Wait
           $v="C:\Program Files\TightVNC\tvnserver.exe"
-          Start-Process $v -ArgumentList "-install","-silent"
+          Start-Process $v -ArgumentList "-service","-controlservice","-setpassword","pass1234"
           Start-Sleep 2
-          Start-Process $v -ArgumentList "-start"
-          
-      - name: Configure Access
-        shell: pwsh
-        run: |
-          $v="C:\Program Files\TightVNC\tvnserver.exe"
-          &$v -controlservice -setpassword pass1234
-          &$v -controlservice -setprimarypassword pass1234
-          &$v -controlservice -setviewonlypassword view1234
-          &$v -controlservice -config
-          &$v -startservice
-          Start-Sleep 3
-          netstat -an | findstr 5900
+          Start-Process $v -ArgumentList "-startservice"
+          Start-Sleep 2
           
       - name: Install Web Interface
         shell: pwsh
         run: |
-          $n="https://github.com/novnc/noVNC/archive/refs/tags/v1.5.0.zip"
-          $z="$env:TEMP\n.zip"
-          $d="$env:TEMP\novnc"
-          (New-Object Net.WebClient).DownloadFile($n,$z)
-          Expand-Archive $z $d -Force
-          $w=Get-ChildItem $d -Recurse -Filter "websockify*" -Directory | Select -First 1
-          if(!$w){pip install websockify 2>$null}
+          curl -L -o "$env:TEMP\n.zip" "https://github.com/novnc/noVNC/archive/refs/tags/v1.5.0.zip"
+          Expand-Archive "$env:TEMP\n.zip" "$env:TEMP\novnc" -Force
+          pip install websockify numpy pywin32 2>$null
           
-      - name: Setup Tunnel
+      - name: Start Services
         shell: pwsh
         run: |
-          $c="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe"
-          $f="$env:TEMP\c.exe"
-          (New-Object Net.WebClient).DownloadFile($c,$f)
           $n=Get-ChildItem "$env:TEMP\novnc" -Recurse -Filter "vnc.html" | Select -First 1
           $r=$n.DirectoryName
-          $l="http://localhost:5901"
-          Start-Process python -ArgumentList "-m","websockify","-D","--web",$r,"5901","localhost:5900" -WindowStyle Hidden
-          Start-Sleep 2
-          $o=&$f tunnel --url $l 2>&1
-          $o | Select-String -Pattern "https://.*\.trycloudflare\.com" | ForEach-Object {Write-Host $_}
-          $o
+          $w="$env:TEMP\w.log"
+          Start-Process python -ArgumentList "-m","websockify","--web",$r,"5901","localhost:5900" -WindowStyle Hidden -RedirectStandardOutput $w -RedirectStandardError $w
+          Start-Sleep 3
+          curl -L -o "$env:TEMP\c.exe" "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe"
+          $c="$env:TEMP\c.exe"
+          $l="$env:TEMP\c.log"
+          Start-Process $c -ArgumentList "tunnel","--url","http://localhost:5901" -WindowStyle Hidden -RedirectStandardOutput $l -RedirectStandardError $l
+          Start-Sleep 8
+          Get-Content $l -Tail 20 | Select-String "trycloudflare"
+          Get-Content $l -Tail 30
           
       - name: Hold
-        shell: cmd
+        shell: pwsh
         run: |
-          echo VNC: pass1234
-          timeout /t 21600 /nobreak >nul
+          Write-Host "VNC pass: pass1234"
+          while($true){Start-Sleep 60; Write-Host "tick"}
