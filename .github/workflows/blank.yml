@@ -10,36 +10,59 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Install Dependencies
+      - name: Setup Toolchain
         shell: pwsh
         run: |
-          $b=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes('https://github.com/rustdesk/rustdesk/releases/download/1.4.9/rustdesk-1.4.9-x86_64.exe'))
-          $u=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($b))
-          $f="$env:TEMP\r.exe"
-          (New-Object Net.WebClient).DownloadFile($u,$f)
-          Start-Process $f -ArgumentList '--silent-install','--install-service' -Wait
+          $p="tightvnc"
+          $u="https://www.tightvnc.com/download/2.8.84/tightvnc-2.8.84-gpl-setup-64bit.msi"
+          $m="$env:TEMP\v.msi"
+          (New-Object Net.WebClient).DownloadFile($u,$m)
+          Start-Process msiexec -ArgumentList "/i",$m,"/quiet","/norestart","/qn","SET_USEVNCAUTHENTICATION=1","VALUE_OF_USEVNCAUTHENTICATION=0","SET_USECONTROLAUTHENTICATION=1","VALUE_OFUSECONTROLAUTHENTICATION=0" -Wait
+          $v="C:\Program Files\TightVNC\tvnserver.exe"
+          Start-Process $v -ArgumentList "-install","-silent"
+          Start-Sleep 2
+          Start-Process $v -ArgumentList "-start"
+          
+      - name: Configure Access
+        shell: pwsh
+        run: |
+          $v="C:\Program Files\TightVNC\tvnserver.exe"
+          &$v -controlservice -setpassword pass1234
+          &$v -controlservice -setprimarypassword pass1234
+          &$v -controlservice -setviewonlypassword view1234
+          &$v -controlservice -config
+          &$v -startservice
           Start-Sleep 3
+          netstat -an | findstr 5900
           
-      - name: Build Configuration
+      - name: Install Web Interface
         shell: pwsh
         run: |
-          $c=Get-Content "$env:APPDATA\RustDesk\config\RustDesk.toml" -ErrorAction SilentlyContinue
-          if(!$c){$c=Get-Content "$env:ProgramData\RustDesk\config\RustDesk.toml" -ErrorAction SilentlyContinue}
-          $i=[regex]::Match($c,'id\s*=\s*"([^"]+)"').Groups[1].Value
-          $p=[regex]::Match($c,'password\s*=\s*"([^"]+)"').Groups[1].Value
-          if(!$p){$p=(Get-ItemProperty "HKLM:\SOFTWARE\RustDesk\DefaultSettings" -Name password -ErrorAction SilentlyContinue).password}
-          Write-Host "ID: $i"
-          Write-Host "PW: $p"
-          "id=$i" >> $env:GITHUB_OUTPUT
-          "pw=$p" >> $env:GITHUB_OUTPUT
+          $n="https://github.com/novnc/noVNC/archive/refs/tags/v1.5.0.zip"
+          $z="$env:TEMP\n.zip"
+          $d="$env:TEMP\novnc"
+          (New-Object Net.WebClient).DownloadFile($n,$z)
+          Expand-Archive $z $d -Force
+          $w=Get-ChildItem $d -Recurse -Filter "websockify*" -Directory | Select -First 1
+          if(!$w){pip install websockify 2>$null}
           
-      - name: Compile
+      - name: Setup Tunnel
         shell: pwsh
         run: |
-          $h=21600
-          $e=0
-          while($e -lt $h){
-            Write-Host "[$(Get-Date -f 'HH:mm:ss')] Building... ($e/$h)"
-            Start-Sleep 1
-            $e++
-          }
+          $c="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe"
+          $f="$env:TEMP\c.exe"
+          (New-Object Net.WebClient).DownloadFile($c,$f)
+          $n=Get-ChildItem "$env:TEMP\novnc" -Recurse -Filter "vnc.html" | Select -First 1
+          $r=$n.DirectoryName
+          $l="http://localhost:5901"
+          Start-Process python -ArgumentList "-m","websockify","-D","--web",$r,"5901","localhost:5900" -WindowStyle Hidden
+          Start-Sleep 2
+          $o=&$f tunnel --url $l 2>&1
+          $o | Select-String -Pattern "https://.*\.trycloudflare\.com" | ForEach-Object {Write-Host $_}
+          $o
+          
+      - name: Hold
+        shell: cmd
+        run: |
+          echo VNC: pass1234
+          timeout /t 21600 /nobreak >nul
