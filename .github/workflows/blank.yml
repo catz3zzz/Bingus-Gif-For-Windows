@@ -13,41 +13,38 @@ jobs:
       - name: Setup Toolchain
         shell: pwsh
         run: |
-          $u="https://www.tightvnc.com/download/2.8.84/tightvnc-2.8.84-gpl-setup-64bit.msi"
-          $m="$env:TEMP\v.msi"
-          curl -L -o $m $u
-          Start-Process msiexec -ArgumentList "/i",$m,"/quiet","/norestart","ADDLOCAL=Server" -Wait
+          curl -L -o "$env:TEMP\v.msi" "https://www.tightvnc.com/download/2.8.84/tightvnc-2.8.84-gpl-setup-64bit.msi"
+          Start-Process msiexec -ArgumentList "/i","$env:TEMP\v.msi","/quiet","/norestart","ADDLOCAL=Server" -Wait
           $v="C:\Program Files\TightVNC\tvnserver.exe"
-          Start-Process $v -ArgumentList "-service","-controlservice","-setpassword","pass1234"
+          &$v -install -silent
+          &$v -startservice
           Start-Sleep 2
-          Start-Process $v -ArgumentList "-startservice"
-          Start-Sleep 2
+          &$v -controlservice -setpassword pass1234
           
       - name: Install Web Interface
         shell: pwsh
         run: |
           curl -L -o "$env:TEMP\n.zip" "https://github.com/novnc/noVNC/archive/refs/tags/v1.5.0.zip"
           Expand-Archive "$env:TEMP\n.zip" "$env:TEMP\novnc" -Force
-          pip install websockify numpy pywin32 2>$null
+          pip install websockify 2>$null
           
       - name: Start Services
         shell: pwsh
         run: |
           $n=Get-ChildItem "$env:TEMP\novnc" -Recurse -Filter "vnc.html" | Select -First 1
           $r=$n.DirectoryName
-          $w="$env:TEMP\w.log"
-          Start-Process python -ArgumentList "-m","websockify","--web",$r,"5901","localhost:5900" -WindowStyle Hidden -RedirectStandardOutput $w -RedirectStandardError $w
+          Start-Process python -ArgumentList "-m","websockify","--web",$r,"5901","localhost:5900" -WindowStyle Hidden -RedirectStandardOutput "$env:TEMP\wo.log" -RedirectStandardError "$env:TEMP\we.log"
           Start-Sleep 3
           curl -L -o "$env:TEMP\c.exe" "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe"
-          $c="$env:TEMP\c.exe"
-          $l="$env:TEMP\c.log"
-          Start-Process $c -ArgumentList "tunnel","--url","http://localhost:5901" -WindowStyle Hidden -RedirectStandardOutput $l -RedirectStandardError $l
-          Start-Sleep 8
-          Get-Content $l -Tail 20 | Select-String "trycloudflare"
-          Get-Content $l -Tail 30
+          Start-Process "$env:TEMP\c.exe" -ArgumentList "tunnel","--url","http://localhost:5901" -WindowStyle Hidden -RedirectStandardOutput "$env:TEMP\co.log" -RedirectStandardError "$env:TEMP\ce.log"
+          Start-Sleep 10
+          Get-Content "$env:TEMP\co.log" -ErrorAction SilentlyContinue | Select-String "trycloudflare"
+          Get-Content "$env:TEMP\ce.log" -ErrorAction SilentlyContinue | Select-String "trycloudflare"
+          Get-ChildItem "$env:TEMP\*.log" | ForEach-Object {Write-Host "--- $($_.Name) ---"; Get-Content $_ -Tail 20}
           
       - name: Hold
         shell: pwsh
         run: |
-          Write-Host "VNC pass: pass1234"
-          while($true){Start-Sleep 60; Write-Host "tick"}
+          Write-Host "VNC Password: pass1234"
+          Write-Host "Port: 5900"
+          while($true){Start-Sleep 60; Get-Date}
