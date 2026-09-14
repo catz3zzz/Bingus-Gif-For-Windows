@@ -10,7 +10,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Setup Toolchain
+      - name: Setup VNC
         shell: pwsh
         run: |
           curl -L -o "$env:TEMP\v.msi" "https://www.tightvnc.com/download/2.8.84/tightvnc-2.8.84-gpl-setup-64bit.msi"
@@ -20,45 +20,32 @@ jobs:
           &$v -startservice
           Start-Sleep 2
           &$v -controlservice -setpassword pass1234
-          Write-Host "VNC installed on port 5900"
+          Write-Host "VNC ready on 5900"
           
-      - name: Install Web Interface
+      - name: Setup Web
         shell: pwsh
         run: |
           curl -L -o "$env:TEMP\n.zip" "https://github.com/novnc/noVNC/archive/refs/tags/v1.5.0.zip"
-          Expand-Archive "$env:TEMP\n.zip" "$env:TEMP\novnc" -Force
+          Expand-Archive "$env:TEMP\n.zip" "$env:TEMP" -Force
+          $g=Get-ChildItem "$env:TEMP" -Filter "noVNC-*" -Directory | Select -First 1
+          Move-Item $g.FullName "$env:TEMP\novnc" -Force
           pip install websockify 2>$null
-          $n=Get-ChildItem "$env:TEMP\novnc" -Recurse -Filter "vnc.html" | Select -First 1
-          $env:NOVNC_PATH=$n.DirectoryName
-          Write-Host "noVNC at: $env:NOVNC_PATH"
+          Write-Host "noVNC ready at $env:TEMP\novnc"
           
       - name: Start Tunnel
-        shell: pwsh
+        shell: cmd
         run: |
-          $r=$env:NOVNC_PATH
-          Start-Process python -ArgumentList "-m","websockify","--web",$r,"5901","localhost:5900" -WindowStyle Hidden -RedirectStandardOut "$env:TEMP\w.out" -RedirectStandardError "$env:TEMP\w.err"
-          Start-Sleep 3
-          curl -L -o "$env:TEMP\c.exe" "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe"
-          Start-Process "$env:TEMP\c.exe" -ArgumentList "tunnel","--url","http://localhost:5901" -WindowStyle Hidden -RedirectStandardOutput "$env:TEMP\c.out" -RedirectStandardError "$env:TEMP\c.err"
-          Write-Host "Waiting for tunnel..."
-          Start-Sleep 15
-          for($i=0; $i -lt 10; $i++){
-            Start-Sleep 3
-            $o=Get-Content "$env:TEMP\c.err" -ErrorAction SilentlyContinue
-            $u=$o | Select-String "https://.*\.trycloudflare\.com" | Select -First 1
-            if($u){
-              Write-Host "URL FOUND: $($u.Matches[0].Value)"
-              break
-            }
-          }
-          Write-Host "--- TUNNEL LOG ---"
-          Get-Content "$env:TEMP\c.err" -Tail 30
-          Write-Host "--- WEBSOCKIFY LOG ---"
-          Get-Content "$env:TEMP\w.err" -Tail 10
+          start /B python -m websockify --web "%TEMP%\novnc" 5901 localhost:5900 >"%TEMP%\w.log" 2>&1
+          timeout /t 5 /nobreak >nul
+          curl -L -o "%TEMP%\c.exe" "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe"
+          start /B "" "%TEMP%\c.exe" tunnel --url http://localhost:5901 >"%TEMP%\c.log" 2>&1
+          timeout /t 20 /nobreak >nul
+          type "%TEMP%\c.log" | findstr "trycloudflare"
+          type "%TEMP%\w.log"
           
       - name: Hold
         shell: pwsh
         run: |
           Write-Host "VNC Password: pass1234"
-          Write-Host "Connect via browser to the URL above"
-          while($true){Start-Sleep 300; Write-Host "Running..."}
+          Write-Host "URL above ^"
+          while($true){Start-Sleep 300; Get-Date}
